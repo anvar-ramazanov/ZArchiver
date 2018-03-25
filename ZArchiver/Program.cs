@@ -9,10 +9,14 @@ namespace ZArchiver
 
         static void Main(string[] args)
         {
+            args = new string[] { "compress", @"D:\Test\testfile.pdf" };
+            //args = new string[] { "decompress", @"D:\Test\testfile.pdf.gz", @"D:\Test\decompressed.pdf" };
+
+
             _logger = LogManager.GetCurrentClassLogger();
 
-            var maxThreadCount = Environment.ProcessorCount * 2;
-            var blockSize = 1023 * 1024; // 1 mb
+            var maxThreadCount = 2; // Environment.ProcessorCount * 2;
+            var blockSize = 1024 * 1024; // 1 mb
 
             if (args.Length < 2)
             {
@@ -49,7 +53,7 @@ namespace ZArchiver
                     output = filename + ".gz";
                 }
                 var compressor = new Compressor(blockSize, maxThreadCount);
-                compressor.Compress(filename, output);
+                compressor.Launch(filename, output);
             }
             else
             {
@@ -58,8 +62,9 @@ namespace ZArchiver
                     output = filename + ".decompressed";
                 }
                 var decompressor = new Decompressor(blockSize, maxThreadCount);
-                decompressor.Decompress(filename, output);
+                decompressor.Launch(filename, output);
             }
+            Console.ReadKey();
         }
 
         private static ILogger _logger;

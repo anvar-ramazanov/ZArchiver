@@ -2,22 +2,25 @@
 using System;
 using System.IO;
 using System.IO.Compression;
+using System.Threading;
 
 namespace ZArchiver
 {
-    public class Compressor : BaseWorker
+    public class Compressor : ZArchiver
     {
         public Compressor(int blockSize, int maxThreadCount) : base(blockSize, maxThreadCount)
         {
             _logger = LogManager.GetCurrentClassLogger();
         }
 
-        public void Compress(string filename, string outputFile)
+        public override void Launch(string filename, string outputFile)
         {
             try
             {
                 _logger.Info("Start compressing file {0}", filename);
-                DoWork(filename, outputFile);
+                _writeDataOffset = 0;
+                _witeHeaderOffset = 0;
+                Compress(filename, outputFile);
             }
             catch (Exception e)
             {
@@ -25,82 +28,129 @@ namespace ZArchiver
             }
         }
 
-        protected override BlockInfo[] GetBlockInfo(string path)
+        private void Compress(string filename, string outputfile)
+        {
+            var readQueue = GetReadQueue(filename);
+            var writeQueue = new BlocksQueue(readQueue.TotalBlocksCount);
+
+            var writerThread = new Thread(() =>
+            {
+                Write(writeQueue, outputfile);
+            });
+            writerThread.Start();
+
+            var maxThreadForRead = _maxThreadCount - 1;
+            var semaphore = new Semaphore(maxThreadForRead, maxThreadForRead);
+            while (readQueue.PreparedBlocks < readQueue.TotalBlocksCount && !readQueue.IsStoped && semaphore.WaitOne())
+            {
+                var readThread = new Thread(() =>
+                {
+                    var block = readQueue.PopBlock();
+                    ReadBlock(filename, block);
+                    if (block.HasError)
+                    {
+                        readQueue.Stop();
+                        writeQueue.Stop();
+                    }
+                    else
+                    {
+                        writeQueue.PushBlock(block);
+                    }
+                    semaphore.Release();
+                });
+                readThread.Start();
+                readQueue.PreparedBlocks++;
+            }
+        }
+
+        protected override BlocksQueue GetReadQueue(string path)
         {
             var fileInfo = new FileInfo(path);
             double fileSize = fileInfo.Length / (_blockSize * 1f);
             var blocksCount = (int)Math.Ceiling(fileSize);
-            var blockInfo = new BlockInfo[blocksCount];
+            var blocksQueue = new BlocksQueue(blocksCount);
             for (int i = 0; i < blocksCount - 1; ++i)
             {
-                blockInfo[i] = new BlockInfo(GetPartName(path, i), _blockSize, i * _blockSize);
+                blocksQueue.PushBlock(new FileBlock(_blockSize, i * _blockSize));
             }
 
-            var name = GetPartName(path, blocksCount - 1);
             var size = (int)(fileInfo.Length - (blocksCount - 1) * _blockSize);
             var offset = (blocksCount - 1) * _blockSize;
-            blockInfo[blocksCount - 1] = new BlockInfo(name, size, offset);
-            return blockInfo;
+            blocksQueue.PushBlock(new FileBlock(size, offset));
+            return blocksQueue;
         }
 
-        protected override Boolean PrepareBlock(string path, BlockInfo block)
+        protected override void Write(BlocksQueue writeQueue, string outputFile)
+        {
+            WriteHeader(writeQueue, outputFile);
+
+            while (writeQueue.PreparedBlocks < writeQueue.TotalBlocksCount && !writeQueue.IsStoped)
+            {
+                try
+                {
+                    var block = writeQueue.PopBlock();
+                    WriteBlock(outputFile, block);
+                    writeQueue.PreparedBlocks++;
+                }
+                catch (Exception e)
+                {
+                    writeQueue.Stop();
+                    _logger.Error(e, "An error occurred while writing block of compressed file");
+                }
+            }
+
+            _logger.Info(string.Format("File compressed"));
+        }
+
+        private void ReadBlock(string path, FileBlock block)
         {
             try
             {
                 using (var fileStream = new FileStream(path, FileMode.Open, FileAccess.Read))
-                using (var compressedFileStream = new FileStream(block.FileName, FileMode.OpenOrCreate))
-                using (var gzip = new GZipStream(compressedFileStream, CompressionMode.Compress))
+                using (var stream = new MemoryStream())
+                using (var gzip = new GZipStream(stream, CompressionMode.Compress))
                 {
-                    fileStream.Position = block.Offset;
+                    fileStream.Position = block.ReadOffset;
                     var buffer = new byte[block.Size];
                     fileStream.Read(buffer, 0, block.Size);
                     gzip.Write(buffer, 0, block.Size);
+                    block.Data = stream.ToArray();
                 }
-                return true;
             }
             catch (Exception e)
             {
-                _logger.Error(e, string.Format("An error occurred while preparing block (offset = {0}, size = {1}, filename = {2}) of compressed file", block.Offset, block.Size, block.FileName));
-                return false;
+                block.HasError = true;
+                _logger.Error(e, string.Format("An error occurred while preparing block (offset = {0}, size = {1}) of compressed file", block.ReadOffset, block.Size));
             }
         }
 
-        protected override void CombineBlocks(string output, BlockInfo[] blockInfo)
+        private void WriteHeader(BlocksQueue writeQueue, string outputFile)
         {
-            try
+            using (var outStream = new FileStream(outputFile, FileMode.OpenOrCreate, FileAccess.Write))
+            using (var binaryWriter = new BinaryWriter(outStream))
             {
-                using (var outputStream = new FileStream(output, FileMode.OpenOrCreate))
-                using (var writer = new BinaryWriter(outputStream))
-                {
-                    writer.Write(blockInfo.Length);
-                    var sizeCursor = sizeof(Int32);
-                    var blocksCursor = sizeCursor + blockInfo.Length * sizeof(Int32);
-                    for (int i = 0; i < blockInfo.Length; ++i)
-                    {
-                        var buff = File.ReadAllBytes(blockInfo[i].FileName);
-                        File.Delete(blockInfo[i].FileName);
-
-                        outputStream.Position = sizeCursor;
-                        writer.Write(buff.Length);
-                        writer.Flush();
-                        sizeCursor += sizeof(Int32);
-
-                        outputStream.Position = blocksCursor;
-                        writer.Write(buff);
-                        writer.Flush();
-                        blocksCursor += buff.Length;
-                    }
-                }
-                _logger.Info("Compressing file completed successfully");
-            }
-            catch (Exception e)
-            {
-                CleanBlocks(blockInfo);
-                CleanOutputFile(output);
-                _logger.Error(e, "An error occurred while combining parts of compressed file");
+                binaryWriter.Write(writeQueue.TotalBlocksCount);
+                _witeHeaderOffset += sizeof(int);
+                _writeDataOffset += (writeQueue.TotalBlocksCount * 2 + 1) * sizeof(int);
             }
         }
 
-        private readonly ILogger _logger;
+        private void WriteBlock(string file, FileBlock block)
+        {
+            using (var outStream = new FileStream(file, FileMode.OpenOrCreate, FileAccess.Write))
+            using (var binaryWriter = new BinaryWriter(outStream))
+            {
+                outStream.Position = _witeHeaderOffset;
+                binaryWriter.Write(block.Data.Length);
+                binaryWriter.Write(block.ReadOffset);
+                _witeHeaderOffset += sizeof(int) * 2;
+                outStream.Position = _writeDataOffset;
+                outStream.Write(block.Data, 0, block.Data.Length);
+                _writeDataOffset += block.Data.Length;
+            }
+        }
+
+        private int _writeDataOffset;
+        private int _witeHeaderOffset;
     }
 }
