@@ -108,12 +108,14 @@ namespace ZArchiver
             {
                 using (var fileStream = new FileStream(path, FileMode.Open, FileAccess.Read))
                 using (var stream = new MemoryStream())
-                using (var gzip = new GZipStream(stream, CompressionMode.Compress))
                 {
-                    fileStream.Position = block.ReadOffset;
-                    var buffer = new byte[block.Size];
-                    fileStream.Read(buffer, 0, block.Size);
-                    gzip.Write(buffer, 0, block.Size);
+                    using (var gzip = new GZipStream(stream, CompressionMode.Compress))
+                    {
+                        fileStream.Position = block.ReadOffset;
+                        var buffer = new byte[block.Size];
+                        fileStream.Read(buffer, 0, block.Size);
+                        gzip.Write(buffer, 0, block.Size);
+                    }
                     block.Data = stream.ToArray();
                 }
             }
@@ -142,11 +144,12 @@ namespace ZArchiver
             {
                 outStream.Position = _witeHeaderOffset;
                 binaryWriter.Write(block.Data.Length);
-                binaryWriter.Write(block.ReadOffset);
+                binaryWriter.Write((int)block.ReadOffset);
                 _witeHeaderOffset += sizeof(int) * 2;
                 outStream.Position = _writeDataOffset;
-                outStream.Write(block.Data, 0, block.Data.Length);
+                binaryWriter.Write(block.Data);
                 _writeDataOffset += block.Data.Length;
+                binaryWriter.Flush();
             }
         }
 

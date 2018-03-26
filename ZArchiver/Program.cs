@@ -9,13 +9,9 @@ namespace ZArchiver
 
         static void Main(string[] args)
         {
-            args = new string[] { "compress", @"D:\Test\testfile.pdf" };
-            //args = new string[] { "decompress", @"D:\Test\testfile.pdf.gz", @"D:\Test\decompressed.pdf" };
-
-
             _logger = LogManager.GetCurrentClassLogger();
 
-            var maxThreadCount = 2; // Environment.ProcessorCount * 2;
+            var maxThreadCount = Environment.ProcessorCount * 2;
             var blockSize = 1024 * 1024; // 1 mb
 
             if (args.Length < 2)

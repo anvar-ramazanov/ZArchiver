@@ -199,7 +199,7 @@ namespace ZArchiver
                 using (var stream = new MemoryStream())
                 using (var gzip = new GZipStream(fileStream, CompressionMode.Decompress))
                 {
-                    fileStream.Position = block.ReadOffset + 1;
+                    fileStream.Position = block.ReadOffset;
                     gzip.CopyTo(stream);
                     block.Data = stream.ToArray();
                 }
