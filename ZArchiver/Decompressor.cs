@@ -18,46 +18,11 @@ namespace ZArchiver
             try
             {
                 _logger.Info("Start decompressing file {0}", filename);
-                Decompress(filename, outputFile);
+                DoJob(filename, outputFile);
             }
             catch (Exception e)
             {
                 _logger.Error(e, string.Format("An error occurred while decompressing the file {0}", filename));
-            }
-        }
-
-        private void Decompress(string filename, string outputFile)
-        {
-            var readQueue = GetReadQueue(filename);
-            var writeQueue = new BlocksQueue(readQueue.TotalBlocksCount);
-
-            var writerThread = new Thread(() =>
-            {
-                Write(writeQueue, outputFile);
-            });
-            writerThread.Start();
-
-            var maxThreadForRead = _maxThreadCount - 1;
-            var semaphore = new Semaphore(maxThreadForRead, maxThreadForRead);
-            while (readQueue.PreparedBlocks < readQueue.TotalBlocksCount && !readQueue.IsStoped && semaphore.WaitOne())
-            {
-                var readThread = new Thread(() =>
-                {
-                    var block = readQueue.PopBlock();
-                    ReadBlock(filename, block);
-                    if (block.HasError)
-                    {
-                        readQueue.Stop();
-                        writeQueue.Stop();
-                    }
-                    else
-                    {
-                        writeQueue.PushBlock(block);
-                    }
-                    semaphore.Release();
-                });
-                readThread.Start();
-                readQueue.PreparedBlocks++;
             }
         }
 
@@ -68,14 +33,15 @@ namespace ZArchiver
             {
                 var blocksCount = reader.ReadInt32();
                 var readQueue = new BlocksQueue(blocksCount);
-                var readOffset = (blocksCount * 2 + 1) * sizeof(int);
-                for (int i =0; i< blocksCount; ++i)
+                long readOffset = GetBlocksSize(blocksCount);
+                for (var i = 0; i < blocksCount; ++i)
                 {
-                    var size = reader.ReadInt32();
-                    var writeOffset = reader.ReadInt32();
+                    var size = reader.ReadInt64();
+                    var writeOffset = reader.ReadInt64();
                     readQueue.PushBlock(new FileBlock(size, readOffset, writeOffset));
                     readOffset += size;
                 }
+
                 return readQueue;
             }
         }
@@ -91,6 +57,7 @@ namespace ZArchiver
                     {
                         break;
                     }
+
                     WriteBlock(outputFile, block);
                     writeQueue.PreparedBlocks++;
                 }
@@ -101,26 +68,9 @@ namespace ZArchiver
                 }
             }
 
-            _logger.Info(string.Format("File decompressed"));
-        }
-
-        private void ReadBlock(string filename, FileBlock block)
-        {
-            try
+            if (!writeQueue.IsStoped)
             {
-                using (var fileStream = new FileStream(filename, FileMode.Open, FileAccess.Read))
-                using (var stream = new MemoryStream())
-                using (var gzip = new GZipStream(fileStream, CompressionMode.Decompress))
-                {
-                    fileStream.Position = block.ReadOffset;
-                    gzip.CopyTo(stream);
-                    block.Data = stream.ToArray();
-                }
-            }
-            catch (Exception e)
-            {
-                block.HasError = true;
-                _logger.Error(e, string.Format("An error occurred while preparing block (offset = {0}, size = {1}) of decompressed file", block.ReadOffset, block.Size));
+                _logger.Info("File decompressed");
             }
         }
 
@@ -131,6 +81,31 @@ namespace ZArchiver
             {
                 outStream.Position = block.WriteOffset;
                 outStream.Write(block.Data, 0, block.Data.Length);
+            }
+        }
+
+        protected override void ReadBlock(string filename, FileBlock block)
+        {
+            try
+            {
+                using (var fileStream = new FileStream(filename, FileMode.Open, FileAccess.Read))
+                using (var stream = new MemoryStream())
+                using (var gzip = new GZipStream(fileStream, CompressionMode.Decompress))
+                {
+                    fileStream.Position = block.ReadOffset;
+                    gzip.CopyTo(stream);
+                    block.Data = stream.ToArray();
+                    stream.Flush();
+                    GC.Collect();
+                }
+            }
+            catch (Exception e)
+            {
+                block.HasError = true;
+                _logger.Error(e,
+                    string.Format(
+                        "An error occurred while preparing block (offset = {0}, size = {1}) of decompressed file",
+                        block.ReadOffset, block.Size));
             }
         }
     }

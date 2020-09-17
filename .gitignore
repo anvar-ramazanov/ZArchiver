@@ -26,3 +26,6 @@ bld/
 
 # Visual Studio cache/options directory
 .vs/
+
+# Rider directory
+.idea/

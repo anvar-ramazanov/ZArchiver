@@ -10,7 +10,7 @@ namespace ZArchiver
         /// <summary>
         /// Размер блока в байтах
         /// </summary>
-        public Int32 Size { get; private set; }
+        public Int64 Size { get; private set; }
         /// <summary>
         /// Смещение блока в прочитанном файле
         /// </summary>
@@ -29,17 +29,23 @@ namespace ZArchiver
         /// </summary>
         public Boolean HasError { get; set; }
 
-        public FileBlock(int blockSize, long readOffset)
+        public FileBlock(long blockSize, long readOffset)
         {
             Size = blockSize;
             ReadOffset = readOffset;
         }
 
-        public FileBlock(int blockSize, long readOffset, long writeOffset)
+        public FileBlock(long blockSize, long readOffset, long writeOffset)
         {
             Size = blockSize;
             ReadOffset = readOffset;
             WriteOffset = writeOffset;
+        }
+
+        public void ClearData()
+        {
+            Data = null;
+            GC.Collect();
         }
     }
 }

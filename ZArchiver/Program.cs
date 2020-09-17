@@ -11,7 +11,7 @@ namespace ZArchiver
         {
             _logger = LogManager.GetCurrentClassLogger();
 
-            var maxThreadCount = Environment.ProcessorCount * 2;
+            var maxThreadCount = Environment.ProcessorCount * 3;
             var blockSize = 1024 * 1024; // 1 mb
 
             if (args.Length < 2)
@@ -19,7 +19,8 @@ namespace ZArchiver
                 _logger.Error("Wrong arguments count. Number of arguments must be at least two");
                 return;
             }
-            else if (args.Length > 3)
+
+            if (args.Length > 3)
             {
                 _logger.Error("Wrong arguments count. Number of arguments must be no more than three");
                 return;
@@ -28,7 +29,6 @@ namespace ZArchiver
             var action = ActionParser.Parse(args[0]);
             var filename = args[1];
             var output = args.Length == 2 ? string.Empty : args[2];
-
 
             if(action == Action.Unknown)
             {
@@ -60,7 +60,6 @@ namespace ZArchiver
                 var decompressor = new Decompressor(blockSize, maxThreadCount);
                 decompressor.Launch(filename, output);
             }
-            Console.ReadKey();
         }
 
         private static ILogger _logger;
