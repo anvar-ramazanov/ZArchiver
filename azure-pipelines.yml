@@ -16,12 +16,6 @@ resources:
      ref: main
      trigger:
       - main
-   - repository: my
-     type: github
-     name: anvar-ramazanov/ZArchiver
-     ref: master
-     trigger:
-      - master
 
 steps:
 - script: echo Hello, world!
