@@ -8,6 +8,21 @@ trigger:
 
 pool: default
 
+resources: 
+  repositories:
+   - repository: ado
+     type: git
+     name: MyFirstProject
+     ref: main
+     trigger:
+      - main
+   - repository: my
+     type: github
+     name: anvar-ramazanov/ZArchiver
+     ref: master
+     trigger:
+      - master
+
 steps:
 - script: echo Hello, world!
   displayName: 'Run a one-line script'
